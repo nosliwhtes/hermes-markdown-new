@@ -1,0 +1,11 @@
+name: markdown-new
+version: 1.0.0
+description: "Search, read, crawl, and convert public web content to Markdown with Markdown.new. No API key required."
+author: nosliwhtes
+kind: backend
+provides_web_providers:
+  - markdown-new
+provides_tools:
+  - markdown_new
+provides_hooks:
+  - pre_tool_call

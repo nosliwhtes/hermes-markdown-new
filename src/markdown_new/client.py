@@ -16,6 +16,7 @@ from .safety import MAX_FILE_SIZE, ValidationError, validate_local_file, validat
 DEFAULT_BASE_URL = "https://markdown.new"
 DEFAULT_TIMEOUT = 30.0
 ERROR_BODY_LIMIT = 4096
+RESPONSE_BODY_LIMIT = 64 * 1024 * 1024
 _RETRY_DELAY = 1.0
 _ACTIVE_CRAWL_STATUSES = frozenset(
     ("queued", "pending", "running", "processing", "starting", "in_progress")
@@ -345,7 +346,13 @@ class MarkdownNewClient:
         for attempt in range(2):
             try:
                 with self._opener.open(request, timeout=self.timeout) as response:
-                    return response.read()
+                    length = response.headers.get("Content-Length")
+                    if length and length.isdecimal() and int(length) > RESPONSE_BODY_LIMIT:
+                        raise APIError("service response exceeds the 64 MiB limit")
+                    raw = response.read(RESPONSE_BODY_LIMIT + 1)
+                    if len(raw) > RESPONSE_BODY_LIMIT:
+                        raise APIError("service response exceeds the 64 MiB limit")
+                    return raw
             except HTTPError as error:
                 error_body = _read_bounded_error(error)
                 retryable = error.code == 429 or 500 <= error.code <= 599

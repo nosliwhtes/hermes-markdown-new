@@ -93,8 +93,19 @@ class MarkdownNewAdapter:
         method: Optional[str] = None,
         retain_images: bool = False,
         cloud_ok: bool = False,
+        content: Optional[bytes] = None,
         timeout: float = 30.0,
     ) -> Dict[str, Any]:
+        if content is not None:
+            # Only the approved immutable snapshot crosses the subprocess boundary.
+            with tempfile.TemporaryDirectory(prefix="markdown-new-upload-") as directory:
+                snapshot = Path(directory) / Path(source).name
+                snapshot.write_bytes(content)
+                snapshot.chmod(0o400)
+                return self.file_convert(
+                    str(snapshot), method=method, retain_images=retain_images,
+                    cloud_ok=cloud_ok, timeout=timeout,
+                )
         args = ["file", source]
         _option(args, "--method", method)
         _flag(args, "--retain-images", retain_images)

@@ -17,6 +17,7 @@ from .safety import (
     SafetyError,
     guard_public_url,
     inspect_upload_path,
+    snapshot_upload,
     is_remote_source,
 )
 
@@ -165,9 +166,11 @@ class MarkdownNewTool:
             prepared = _validate_args(args)
             operation = prepared["operation"]
             approved_upload = None
+            upload_content = None
             if _requires_approval(prepared):
                 if operation == "file_convert":
                     approved_upload = inspect_upload_path(prepared["source"])
+                    upload_content = snapshot_upload(approved_upload)
                 message = _approval_message(prepared, approved_upload)
                 rule_key = "markdown-new-once:{}".format(secrets.token_urlsafe(24))
                 approval = self.approval_requester("markdown_new", message, rule_key)
@@ -180,7 +183,7 @@ class MarkdownNewTool:
                     if current_upload != approved_upload:
                         raise OperationError("local upload target or identity changed after approval")
                     prepared["source"] = str(current_upload[0])
-            data, extra = await self._execute(prepared, approved_upload=approved_upload)
+            data, extra = await self._execute(prepared, approved_upload=approved_upload, upload_content=upload_content)
             job_id = str(extra.get("job_id") or "")
             envelope = {"success": True, "operation": operation, "data": data}
             envelope.update(extra)
@@ -198,6 +201,7 @@ class MarkdownNewTool:
         self,
         args: Dict[str, Any],
         *,
+        upload_content: Optional[bytes] = None,
         approved_upload: Optional[Tuple[Path, Tuple[int, int, int, int, int]]] = None,
     ) -> Tuple[Any, Dict[str, Any]]:
         operation = args["operation"]
@@ -251,7 +255,7 @@ class MarkdownNewTool:
                 cloud_ok = False
             else:
                 current_upload = inspect_upload_path(source)
-                if approved_upload is None or current_upload != approved_upload:
+                if upload_content is None or approved_upload is None or current_upload != approved_upload:
                     raise OperationError("local upload target or identity changed after approval")
                 source = str(current_upload[0])
                 cloud_ok = True
@@ -261,6 +265,7 @@ class MarkdownNewTool:
                 method=args.get("method"),
                 retain_images=args["retain_images"],
                 cloud_ok=cloud_ok,
+                content=upload_content,
                 timeout=timeout,
             )
             return data, {}
@@ -421,7 +426,7 @@ def _approval_message(
             "completed pages may remain available.".format(args["job_id"])
         )
     path = (upload or inspect_upload_path(str(args["source"])))[0]
-    size = path.stat().st_size
+    size = upload[1][2] if upload is not None else path.stat().st_size
     return "Upload local file '{}' ({} bytes) to markdown.new.".format(path, size)
 
 

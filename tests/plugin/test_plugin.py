@@ -130,6 +130,83 @@ class ProviderAndToolContractTests(unittest.TestCase):
             adapter or FakeAdapter(), safety_gate=allow_url, **kwargs
         )
 
+    def test_native_extract_enforces_guard_and_host_async_dispatch(self):
+        from tools.web_tools_extract import _dispatch_extract
+        adapter = FakeAdapter()
+        provider = self.provider_module.MarkdownNewWebProvider(adapter)
+        urls = ["https://example.com/?token=opaque-fixture", "https://example.com/blocked",
+                "https://example.com/good"]
+        with mock.patch.object(self.safety_module, "async_is_safe_url", new=mock.AsyncMock(return_value=True)), mock.patch.object(
+            self.safety_module, "check_website_access",
+            side_effect=lambda url: {"message": "fixture policy"} if url.endswith("blocked") else None,
+        ), mock.patch("tools.web_result_cache.extract_cache_put"), mock.patch(
+            "tools.web_tools_extract._rescue_eligible", return_value=False
+        ):
+            rows = asyncio.run(_dispatch_extract(provider, urls, None))
+        self.assertEqual([row["url"] for row in rows], urls)
+        self.assertIn("credential", rows[0]["error"])
+        self.assertIn("fixture policy", rows[1]["error"])
+        self.assertEqual(rows[2]["content"], "# good")
+        self.assertEqual([call[1] for call in adapter.calls], [urls[2]])
+
+    def test_native_guard_refusals_are_not_rescued_by_host(self):
+        from tools.web_tools_extract import _dispatch_extract
+        adapter = FakeAdapter()
+        provider = self.provider_module.MarkdownNewWebProvider(adapter)
+        urls = ["https://example.com/?token=opaque-fixture", "https://example.com/blocked"]
+        with mock.patch.object(self.safety_module, "async_is_safe_url", new=mock.AsyncMock(return_value=True)), mock.patch.object(
+            self.safety_module, "check_website_access", return_value={"message": "fixture refusal"}
+        ), mock.patch("tools.web_tools_extract._rescue_eligible", return_value=True), mock.patch(
+            "plugins.web.keyless_mcp.extract_with_failover", side_effect=AssertionError("must not fetch refused URLs")
+        ) as fallback:
+            rows = asyncio.run(_dispatch_extract(provider, urls, None))
+        self.assertTrue(all(row["blocked_by_policy"] for row in rows))
+        self.assertEqual(adapter.calls, [])
+        fallback.assert_not_called()
+
+    def test_snapshot_survives_file_and_symlink_swap_at_adapter_boundary(self):
+        adapter_module = importlib.import_module(self.package_name + ".adapter")
+        for symlink in (False, True):
+            with self.subTest(symlink=symlink), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory) / "note.txt"
+                source.write_bytes(b"approved fixture")
+                replacement = Path(directory) / "other.txt"
+                replacement.write_bytes(b"different fixture")
+                adapter = adapter_module.MarkdownNewAdapter()
+                original = adapter.file_convert
+                captured = []
+                def swap_then_convert(path, **kwargs):
+                    source.unlink()
+                    if symlink:
+                        source.symlink_to(replacement)
+                    else:
+                        source.write_bytes(b"different fixture")
+                    # Restore the bound implementation for its snapshot-only recursion.
+                    adapter.file_convert = original
+                    return original(path, **kwargs)
+                def capture(args, timeout):
+                    captured.append(Path(args[1]))
+                    self.assertEqual(captured[-1].read_bytes(), b"approved fixture")
+                    return {"data": {"content": "fixture"}}
+                adapter.file_convert = swap_then_convert
+                with mock.patch.object(adapter, "_json", side_effect=capture):
+                    result = self.run_tool(self.make_tool(adapter, approval_requester=lambda *a: {"approved": True}),
+                                           {"operation": "file_convert", "source": str(source)})
+                self.assertTrue(result["success"], result)
+                self.assertFalse(captured[0].exists())
+
+    def test_snapshot_rejects_symlink_swap_between_inspection_and_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "note.txt"
+            source.write_bytes(b"fixture")
+            upload = self.safety_module.inspect_upload_path(str(source))
+            other = Path(directory) / "other.txt"
+            other.write_bytes(b"other")
+            source.unlink()
+            source.symlink_to(other)
+            with self.assertRaisesRegex(self.safety_module.SafetyError, "snapshot"):
+                self.safety_module.snapshot_upload(upload)
+
     def test_adapter_version_check_ignores_parent_pythonpath(self):
         adapter_module = importlib.import_module(self.package_name + ".adapter")
         with tempfile.TemporaryDirectory() as directory:
@@ -169,9 +246,10 @@ class ProviderAndToolContractTests(unittest.TestCase):
         )
         self.assertEqual(adapter.calls[0], ("search", "example", {"n": 5}))
 
-        extracted = provider.extract(
-            ["https://example.com/good", "https://example.com/bad"]
-        )
+        with mock.patch.object(self.provider_module, "guard_public_url", side_effect=allow_url):
+            extracted = asyncio.run(provider.extract(
+                ["https://example.com/good", "https://example.com/bad"]
+            ))
         self.assertEqual([row["url"] for row in extracted], [
             "https://example.com/good", "https://example.com/bad"
         ])

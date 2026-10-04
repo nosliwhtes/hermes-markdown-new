@@ -28,7 +28,7 @@ These are example prompts, not demonstrations of a completed crawl or conversion
 
 ## Install
 
-Requires a Hermes version with `register_web_search_provider`, Python 3.10+ for the native plugin, and the companion `markdown-new` CLI on your `PATH`. The CLI is included in this repository and has no runtime Python dependencies.
+Requires a Hermes version with `register_web_search_provider` and async provider extraction, Python 3.10+ for the native plugin, and the companion `markdown-new` CLI on your `PATH`. The CLI is included in this repository and has no runtime Python dependencies.
 
 ### 1. Install the companion CLI
 
@@ -96,11 +96,13 @@ You can also edit Markdown in [Markdown.new's web editor](https://markdown.new/m
 
 Local uploads and crawl cancellation require approval for each invocation. The plugin blocks private-network URLs, sensitive-looking local paths, and file-substitution attempts. These checks are safeguards, not a content classifier: they cannot prove that a file is safe to upload. Do not submit credentials, confidential documents, authenticated pages, or internal URLs.
 
+Native extraction and advanced URL operations share the host URL and website-policy guard. Local uploads capture at most 10 MiB before approval; the CLI receives a private temporary copy of those exact bytes, removed after conversion. The original path is rechecked after approval, but subsequent file changes cannot replace the approved bytes. HTTP response bodies are limited to 64 MiB while reading, including responses without Content-Length.
+
 No API key is required, but service limits, availability, conversion quality, and supported formats are controlled by Markdown.new. A crawl may return a cached job; that does not establish that every page was fetched again. Existing Hermes providers remain available, but fallback depends on your host configuration.
 
 ## Verification and development
 
-The release uses the previously reviewed client and native plugin without runtime-code changes. Its full suite was run against the active Hermes host: **69 tests passed, with no skips**. Coverage includes native provider contracts, source-link normalization, all eight advanced operations, approval denial and replay, URL safety, symlinks, and file identity checks.
+Coverage includes native async provider dispatch, source-link normalization, all eight advanced operations, approval denial and replay, URL safety, symlinks, immutable upload snapshots, and response read budgets.
 
 To exercise native host contracts as well as the standalone client tests, point to your Hermes source checkout and use its Python environment:
 

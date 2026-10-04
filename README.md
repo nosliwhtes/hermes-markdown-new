@@ -41,7 +41,7 @@ Installing does not change your active provider defaults or toolsets automatical
 
 ## Verification
 
-The release's full host-integrated suite passed **69 tests with no skips**. Its runtime code is unchanged from the previously reviewed implementation. See the [development instructions](plugin/markdown-new/README.md#verification-and-development) to run client tests and native Hermes contract tests together.
+The offline suite covers client behavior and native host integration, including URL policy enforcement, approved upload snapshots, and bounded response reads. See the [development instructions](plugin/markdown-new/README.md#verification-and-development) to run client tests and native Hermes contract tests together.
 
 ## Contribute
 

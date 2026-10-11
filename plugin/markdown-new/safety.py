@@ -1,6 +1,7 @@
 """Shared trust-boundary checks for additive Markdown.new URL and file operations."""
 
 import ipaddress
+import os
 import socket
 import stat
 from pathlib import Path
@@ -151,3 +152,25 @@ def _is_legacy_ipv4_address(host: str) -> bool:
     except OSError:
         return False
     return True
+
+
+def snapshot_upload(upload: Tuple[Path, Tuple[int, int, int, int, int]]) -> bytes:
+    """Capture bounded bytes from the inspected inode before asking for approval."""
+    path, identity = upload
+    try:
+        descriptor = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            def matches(metadata):
+                return stat.S_ISREG(metadata.st_mode) and (
+                    metadata.st_dev, metadata.st_ino, metadata.st_size,
+                    metadata.st_mtime_ns, metadata.st_ctime_ns,
+                ) == identity
+            if not matches(before):
+                raise SafetyError("local upload identity changed before approval")
+            content = stream.read(MAX_FILE_SIZE + 1)
+            if len(content) > MAX_FILE_SIZE or not matches(os.fstat(stream.fileno())):
+                raise SafetyError("local upload identity changed before approval")
+            return content
+    except OSError as error:
+        raise SafetyError("cannot snapshot local upload") from error

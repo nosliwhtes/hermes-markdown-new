@@ -1,7 +1,9 @@
+import io
 import json
 import math
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from markdown_new.client import APIError, ERROR_BODY_LIMIT, MarkdownNewClient
 from markdown_new.safety import ValidationError
@@ -22,6 +24,54 @@ class FakeClock:
 class MarkdownNewClientContractTests(unittest.TestCase):
     def client(self, server, **kwargs) -> MarkdownNewClient:
         return MarkdownNewClient(base_url=server.url, timeout=1, **kwargs)
+
+    def test_response_read_budget_with_and_without_content_length(self):
+        for header in (None, "9", "invalid", "1"):
+            with self.subTest(header=header):
+                response = io.BytesIO(b"x" * 9)
+                response.headers = {} if header is None else {"Content-Length": header}
+                response.read = mock.Mock(wraps=response.read)
+                opener = mock.Mock()
+                opener.open.return_value = response
+                with mock.patch("markdown_new.client.RESPONSE_BODY_LIMIT", 8):
+                    with self.assertRaisesRegex(APIError, "64 MiB limit"):
+                        MarkdownNewClient(opener=opener)._request("GET", "/")
+                if header == "9":
+                    response.read.assert_not_called()
+                else:
+                    response.read.assert_called_once_with(9)
+                self.assertTrue(response.closed)
+                opener.open.assert_called_once()
+
+    def test_huge_decimal_content_length_is_bounded_and_closed(self):
+        for header in ("9" * 5000, "0" * 5000 + "9"):
+            with self.subTest(header_length=len(header)):
+                response = io.BytesIO(b"unused")
+                response.headers = {"Content-Length": header}
+                response.read = mock.Mock(wraps=response.read)
+                opener = mock.Mock()
+                opener.open.return_value = response
+                with mock.patch("markdown_new.client.RESPONSE_BODY_LIMIT", 8):
+                    with self.assertRaisesRegex(APIError, "64 MiB limit"):
+                        MarkdownNewClient(opener=opener)._request("GET", "/")
+                response.read.assert_not_called()
+                self.assertTrue(response.closed)
+
+    def test_long_zero_padded_length_preserves_valid_response(self):
+        response = io.BytesIO(b"ok")
+        response.headers = {"Content-Length": "0" * 5000 + "2"}
+        opener = mock.Mock()
+        opener.open.return_value = response
+        self.assertEqual(MarkdownNewClient(opener=opener)._request("GET", "/"), b"ok")
+        self.assertTrue(response.closed)
+
+    def test_response_at_budget_is_accepted(self):
+        response = io.BytesIO(b"12345678")
+        response.headers = {"Content-Length": "8"}
+        opener = mock.Mock()
+        opener.open.return_value = response
+        with mock.patch("markdown_new.client.RESPONSE_BODY_LIMIT", 8):
+            self.assertEqual(MarkdownNewClient(opener=opener)._request("GET", "/"), b"12345678")
 
     def test_url_conversion_posts_root_and_reads_top_level_content(self) -> None:
         response = {"content": "# Converted", "markdown": "wrong-field"}

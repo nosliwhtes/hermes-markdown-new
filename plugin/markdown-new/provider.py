@@ -1,10 +1,13 @@
 """Native Hermes WebSearchProvider normalization for Markdown.new."""
 
+import asyncio
+
 from typing import Any, Dict, List, Optional
 
 from agent.web_search_provider import WebSearchProvider
 
 from .adapter import MarkdownNewAdapter
+from .safety import SafetyError, guard_public_url
 
 
 class MarkdownNewWebProvider(WebSearchProvider):
@@ -49,12 +52,13 @@ class MarkdownNewWebProvider(WebSearchProvider):
         except Exception as error:
             return {"success": False, "error": str(error)}
 
-    def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:
+    async def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:
         del kwargs
         rows = []
         for url in urls:
             try:
-                result = self.adapter.convert_url(url)
+                normalized = await guard_public_url(url)
+                result = await asyncio.to_thread(self.adapter.convert_url, normalized)
                 content = result.get("content")
                 if not isinstance(content, str):
                     raise RuntimeError("service response is missing content")
@@ -76,6 +80,8 @@ class MarkdownNewWebProvider(WebSearchProvider):
                         "content": "",
                         "raw_content": "",
                         "error": str(error),
+                        # Hermes must not rescue intentional refusals through another vendor.
+                        **({"blocked_by_policy": True} if isinstance(error, SafetyError) else {}),
                     }
                 )
         return rows

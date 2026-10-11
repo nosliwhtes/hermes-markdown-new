@@ -43,6 +43,28 @@ class MarkdownNewClientContractTests(unittest.TestCase):
                 self.assertTrue(response.closed)
                 opener.open.assert_called_once()
 
+    def test_huge_decimal_content_length_is_bounded_and_closed(self):
+        for header in ("9" * 5000, "0" * 5000 + "9"):
+            with self.subTest(header_length=len(header)):
+                response = io.BytesIO(b"unused")
+                response.headers = {"Content-Length": header}
+                response.read = mock.Mock(wraps=response.read)
+                opener = mock.Mock()
+                opener.open.return_value = response
+                with mock.patch("markdown_new.client.RESPONSE_BODY_LIMIT", 8):
+                    with self.assertRaisesRegex(APIError, "64 MiB limit"):
+                        MarkdownNewClient(opener=opener)._request("GET", "/")
+                response.read.assert_not_called()
+                self.assertTrue(response.closed)
+
+    def test_long_zero_padded_length_preserves_valid_response(self):
+        response = io.BytesIO(b"ok")
+        response.headers = {"Content-Length": "0" * 5000 + "2"}
+        opener = mock.Mock()
+        opener.open.return_value = response
+        self.assertEqual(MarkdownNewClient(opener=opener)._request("GET", "/"), b"ok")
+        self.assertTrue(response.closed)
+
     def test_response_at_budget_is_accepted(self):
         response = io.BytesIO(b"12345678")
         response.headers = {"Content-Length": "8"}

@@ -347,8 +347,13 @@ class MarkdownNewClient:
             try:
                 with self._opener.open(request, timeout=self.timeout) as response:
                     length = response.headers.get("Content-Length")
-                    if length and length.isdecimal() and int(length) > RESPONSE_BODY_LIMIT:
-                        raise APIError("service response exceeds the 64 MiB limit")
+                    if length and length.isascii() and length.isdecimal():
+                        # Bound conversion before int(), including on Python versions
+                        # without an integer-string digit limit. Zero padding is valid.
+                        significant_length = length.lstrip("0") or "0"
+                        if (len(significant_length) > len(str(RESPONSE_BODY_LIMIT))
+                                or int(significant_length) > RESPONSE_BODY_LIMIT):
+                            raise APIError("service response exceeds the 64 MiB limit")
                     raw = response.read(RESPONSE_BODY_LIMIT + 1)
                     if len(raw) > RESPONSE_BODY_LIMIT:
                         raise APIError("service response exceeds the 64 MiB limit")

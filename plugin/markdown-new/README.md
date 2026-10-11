@@ -119,3 +119,11 @@ Bug reports and pull requests are welcome at [nosliwhtes/hermes-markdown-new](ht
 ## License and affiliation
 
 MIT licensed. Community integration by [nosliwhtes](https://github.com/nosliwhtes), not affiliated with or endorsed by Markdown.new, Cloudflare, or Nous Research. The MIT license covers this repository's code, not the third-party service or content you retrieve.
+
+### Secure local-upload platform support
+
+Local upload snapshots require `os.O_NOFOLLOW` and `os.O_NONBLOCK`. If either
+flag is unavailable (including standard Windows Python), local uploads fail
+with a controlled safety error before snapshotting, approval, or upload. URL operations are
+unaffected. The plugin does not silently omit these protections; functional
+Windows local uploads require an equivalent secure opener and platform tests.

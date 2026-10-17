@@ -157,8 +157,12 @@ def _is_legacy_ipv4_address(host: str) -> bool:
 def snapshot_upload(upload: Tuple[Path, Tuple[int, int, int, int, int]]) -> bytes:
     """Capture bounded bytes from the inspected inode before asking for approval."""
     path, identity = upload
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nofollow is None or nonblock is None:
+        raise SafetyError("secure local uploads are unavailable on this platform")
     try:
-        descriptor = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(str(path), os.O_RDONLY | nofollow | nonblock)
         with os.fdopen(descriptor, "rb") as stream:
             before = os.fstat(stream.fileno())
             def matches(metadata):
